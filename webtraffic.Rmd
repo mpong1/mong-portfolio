@@ -1,0 +1,181 @@
+---
+title: "Webtraffic"
+author: "Mel Ong"
+date: "2024-06-27"
+output: html_document
+---
+
+This documentation demonstrates how to forecast Philippine inflation rates using ARIMA. ARIMA models are flexible tools in forecasting time series data given that it is straightforward to implement and that it is easy to compare and test its accuracy vis-a-vis alternative models.
+
+In this regard, we shall compare two models: (a) a base model with manually identified ARIMA orders based on the series' autocorrelation function (ACF) and partial autocorrelation function (PACF); and (b) a model determined via `auto.arima`. Note that since this is forecasting, the forecaster is bound to make errors in judgment and the only best thing one can do is to test for accuracy to select the appropriate model to run the forecasts.
+
+# Loading the time-series data
+
+To begin, load the needed libraries.
+
+```{r, include = FALSE}
+library(readxl)
+library(tidyverse)
+library(ggplot2)
+library(forecast)
+library(tseries)
+library(stats)
+library(zoo)
+library(timeSeries)
+```
+
+```{r, eval = FALSE}
+library(readxl)
+library(tidyverse)
+library(ggplot2)
+library(forecast)
+library(tseries)
+library(stats)
+library(zoo)
+library(timeSeries)
+```
+
+# Load the data
+
+```{r}
+web <- read_excel("C:/Users/levil/Desktop/Web Traffic/web_traffic.xlsx", 
+                  col_names = TRUE, sheet = "web_traffic")
+```
+
+Then, we remove the first observation because it has only a 30 minute difference with the second observation, while the rest of the other observations are 1 hour apart.
+
+```{r}
+web <- web[-1,]
+web
+```
+
+#Splitting the dataset
+
+Next, we split the dataset into the train and the test sets.
+
+```{r}
+total_data <- nrow(web)
+train_prop <- 0.8
+train_size <- floor(total_data * train_prop)
+train_data <- web[1:train_size,]
+test_data <- web[(train_size + 1):nrow(web),]
+```
+
+# Plot the train data
+
+Now that we've split the dataset into two, it's time to look at what we're dealing with.
+
+```{r}
+train_data %>%
+  ggplot()+
+  geom_line(aes(x = Timestamp, y = TrafficCount), col = "maroon", linewidth = 0.5)+
+  ylab("Web Traffic") +
+  xlab("Timestamp")+
+  theme(panel.background = element_blank())
+```
+
+Eyeballing the plot we can spot seasonality, but we'll also decompose it to see seasonality for ourselves. For now, we need to convert this to time series.
+
+```{r}
+train_ts <- ts(train_data$TrafficCount, start = train_data$Timestamp[1], frequency = 24)
+```
+
+Now that we've converted it to a time series object, it's time to check for stationarity.
+
+# Tests for Stationarity: ADF and KPSS tests
+
+```{r}
+adf_train <- adf.test(train_ts)
+adf_train
+```
+
+The p-value is 0.01. This means the time series is stationary. no need to perform differencing. Backing this up with the KPSS test, we get:
+
+```{r, fig.align = "center"}
+kpss_train <- kpss.test(train_ts)
+kpss_train
+```
+
+The p-value is 0.1. This backs up that the series is stationary. 
+
+Now we need to get the ACF and PACF to determine the AR and MA order:
+
+# ACF and PACF Plots: Determininig the AR and the MA order.
+
+Use this youtube video as a reference for interpretation: https://www.youtube.com/watch?v=CAT0Y66nPhs
+
+```{r}
+acf_train <- acf(coredata(train_ts))
+```
+
+Tail off at only the ACF, so it's an AR model.
+
+```{r}
+pacf_train <- pacf(coredata(train_ts))
+```
+
+Inspection of PACF reveals 2 significant lags, so order is AR 2. We have an ARIMA model of (2, 0, 0)
+
+Now that we know the ARIMA order, we will now check for seasonality. 
+
+# Checking for seasonality
+
+To do this, we need to decompose the time series.
+
+```{r}
+train_ts_comp <- decompose(train_ts)
+plot(coredata(train_ts_comp))
+```
+
+Now that we've decomposed it, we'll have to subtract the seasonal component to seasonally adjust it.
+
+```{r}
+train_ts_adj <- train_ts - train_ts_comp$seasonal
+plot.ts(coredata(train_ts_adj))
+plot.ts(train_ts_adj)
+```
+
+Now that we've removed the seasonality, we can proceed to building the ARIMA model. 
+
+We can now estimate a (2, 0, 0) ARIMA model.
+
+```{r}
+model1 <- arima(
+  train_ts_adj,
+  order = c(2,0,0)
+)
+
+summary(model1)
+```
+
+What can we say about the summary? The aic is alarmingly high.
+
+After estimating, we can generate our out of sample forecast, say, 5 months ahead
+
+```{r}
+predictions <- forecast(
+  Arima(train_ts_adj, model = model1), h = 120) 
+
+predictions
+```
+
+We can also plot this by running:
+
+```{r}
+plot(predictions)
+```
+
+Let's try the auto.arima
+
+```{r}
+model2 <- auto.arima(train_ts_adj)
+summary(model2)
+```
+
+The aic of this auto.arima model is still high. 
+
+```{r}
+predictions2 <- forecast(model2, h = 120)
+predictions2
+```
+
