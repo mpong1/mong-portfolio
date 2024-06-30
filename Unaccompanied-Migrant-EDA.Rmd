@@ -1,0 +1,416 @@
+---
+title: "Unaccompanied Migrant EDA"
+author: "Mel Ong"
+date: "2024-05-26"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+library(ggplot2)
+library(fishualize)
+library(scales)
+library(knitr)
+library(tidyr)
+```
+
+## Source
+
+Our data comes from this: https://github.com/nytimes/hhs-child-migrant-data. Here, we study the unaccompanied migrant children from all over the world who come to the US for better opportunities. Work is tough and children are often forced to take on jobs that have >12 hour shifts in very hazardous working conditions. This dataset details their date of entry and date of release, as well as their country of origin, their gender, and their respective relationships with their sponsors. We will perform an exploratory data analysis to know what the data is telling us about these migrant children.
+
+First off, we load the necessary libraries.
+
+```{r}
+
+library(tidyverse)
+library(ggplot2)
+library(fishualize)
+library(scales)
+library(knitr)
+library(tidyr)
+
+```
+
+And then we read the data:
+
+```{r, echo=TRUE}
+
+data <- read.csv('C:/Users/levil/Desktop/UnaccompaniedMigrantChildren_NYT/data.csv')
+
+```
+
+We assign a value called `na_col_numbers` to know the columns that have values of N/A that are more than 0
+
+Then we put it through the function `which`, which gives us the column index of the column which has the N/A values.
+
+The `data.matrix()` function tabulates the count of rows on the column where there are N/A values.
+
+```{r, echo=TRUE}
+na_col_numbers <- data %>% 
+  is.na() %>% 
+  colSums() > 0
+
+which(na_col_numbers)
+
+data.matrix(colSums(is.na(data)))
+```
+We will now filter the rows that have N/A values in them to see what relationships the sponsors have with the migrant children. 
+
+```{r}
+spons_filtered <- data %>% 
+  select(Sponsor.Category, Relationship.of.Sponsor) %>% 
+  filter(is.na(Sponsor.Category)) %>% 
+  count(Relationship.of.Sponsor)
+
+spons_filtered
+```
+
+As we can see, the rows that have N/A values have relationships to migrant children in these categories:
+
+-family friend
+
+-first cousin
+
+-nephew
+
+-niece
+
+-Parent's partner
+
+-unknown
+
+Now let's look at the Sponsor Category fields definitions: 
+
+The Sponsor Category field is defined as 
+
+1) parent or legal guardian; 
+
+2) immediate relative; 
+
+3) distant relative or unrelated adult individual.
+
+If we look at the relationships, they all fall under category 3. They are not a parent or legal guardian. They are not immediate relatives. So that only leaves distant relative or unrelated adult individual. 
+
+Our next move is to convert the N/A values into 3.
+
+```{r, echo=TRUE}
+data$Sponsor.Category[is.na(data$Sponsor.Category)] <- 3
+```
+
+Checking the data for N/A values, we find that there are none. The data is now ready for analysis.
+
+```{r, echo=TRUE}
+any(is.na(data))
+
+#Data is now clean
+```
+Let's also add in a column called entry_year
+```{r}
+data <- data %>% 
+  mutate(entry_year= format(as.Date(Child.s.Date.of.Entry, "%m/%d/%Y"), "%Y"))
+
+```
+
+
+## What is distribution of gender?
+
+Looking at our data, we first wanna know what we're dealing with here, so what better way to do that than to check how the counts for gender stack against each other?
+
+```{r, echo=TRUE}
+ggplot(data, aes(x= Child.s.Gender)) +
+  geom_bar(fill="#FFD900") +
+  scale_y_continuous(labels=comma) +
+  theme(panel.background = element_blank()) + 
+  labs(x="Child's Gender", title="Distribution of Migrant Children's Gender")
+```
+
+Our first plot shows that males outnumber females.
+
+As we shall see on this table below, males overwhelmingly outnumber females. Males make up more than half of the total unaccompanied migrant children who came to the US. This is for all the years in the data.
+
+```{r, echo=TRUE}
+data %>% 
+  count(Child.s.Gender) %>% 
+  rename(Gender = Child.s.Gender) %>% 
+  mutate(pct = round(n/sum(n)*100, 1))
+```
+
+Based on this we can see that males, which comprise of 65.9% of the data, overwhelmingly outnumber females.
+
+Has it always been like this over the years?
+
+## How do the gender distributions look like over the years? 
+
+```{r}
+gender_years <- data %>% 
+  group_by(Child.s.Gender, entry_year) %>% 
+  summarise(count = n()) %>% 
+  pivot_wider(names_from = entry_year, values_from = count) %>% 
+  rename(Gender= Child.s.Gender)
+
+gender_years
+```
+
+
+```{r}
+kable(gender_years,
+      col.names = c("Gender", names(gender_years)[-1]), # -1 because we want 
+      # to exclude the first column, because that's the only thing we changed.
+      caption = "Gender distribution throughout the years",
+      format.args = list(big.mark = ","))
+```
+
+That's cool, but what does this look like plotted? 
+
+```{r}
+ggplot(data, aes(x = entry_year, fill = Child.s.Gender)) +
+  geom_bar(position = "dodge") +  # Dodge bars to avoid overlap
+  labs(title = "Distribution of Gender Across Entry Years",
+       x = "Entry Year",
+       y = "", 
+       fill = "Gender") +
+  scale_y_continuous(labels=comma) +
+  scale_fill_manual("Gender", values = c("F" = "#C20030", "M" = "#0B1354")) +
+  theme(panel.background = element_blank())
+```
+
+What we see here is that the in all the entry years, males outnumbered females. Another salient observation is that in 2020, the number of migrant children crossing the border dipped to unprecedented low levels. This makes sense because of covid. In the following years after covid, we see a major spike. 
+
+The next thing we're going to do is to make a dataframe called df, with the dates columns being in the date format.
+
+```{r, echo=TRUE}
+df <- data %>% 
+  mutate(Child.s.Date.of.Entry = as.Date(Child.s.Date.of.Entry, format = "%m/%d/%Y")) %>%
+  mutate(Child.s.Date.of.Release = as.Date(Child.s.Date.of.Release, format = "%m/%d/%Y"))
+
+str(df)
+```
+
+Why did we do that? We did that because now we wanna play around with the entry and release dates, and we can't do that if they are not formatted to the date format. This is where the lubridate package comes in. After converting the data type, we specifically answer the question of:
+
+## How long were the kids held up?
+
+To answer this, we must look at the difference of the entry date and the release date. This is why we gotta make a dataframe that includes a column for the days difference. 
+
+```{r, echo=TRUE}
+df <- df %>% 
+  mutate(daysdiff =difftime(df$Child.s.Date.of.Release, df$Child.s.Date.of.Entry, units = "days")) %>% 
+  mutate(daysdiff = as.numeric(daysdiff)) %>% 
+  mutate(Sponsor.Category = as.character(data$Sponsor.Category))
+```
+
+#How long is the usual waiting time for the migrant children per country? 
+
+We want to know the average day difference per country. Does this have a trend? Which countries of migrant children take longer to be processed?  
+
+```{r}
+daysdiff_cty <- df %>%
+  select(Child.s.Country.of.Origin, daysdiff) %>%
+  group_by(Child.s.Country.of.Origin) %>% 
+  summarise("Average Day Difference" = round(mean(daysdiff), 1), "Total Count of Migrant Children"= n()) %>%
+  arrange(desc("Average Day Difference")) %>% 
+  rename(Country = Child.s.Country.of.Origin)
+  
+daysdiff_cty
+```
+
+Let's make a publication-style table for this
+
+```{r}
+#Top 10 countries average day difference
+kable(daysdiff_cty,
+      col.names = c('Country', 'Average day difference', 
+                    'Total Count of Migrant Children over the years'),
+      caption = "Tabulation of average day difference per country and the count",
+      format.args = list(big.mark = ","))
+```
+
+As we can see, the countries that have the most migrant children overall take median of average day difference. we can interpret this as, on average, the countries where migrant children come from the most take neither relatively too long or too short a time. 
+
+##Do certain years influence how fast the turnover is?
+
+What is the average day difference for each entry_year? Let's find out.
+
+```{r}
+ddiff_yr <- df %>% 
+  select(entry_year, daysdiff) %>% 
+  group_by(entry_year) %>% 
+  summarise("average day difference" = mean(daysdiff)) %>% 
+  rename("Entry Year" = entry_year)
+
+ddiff_yr
+```
+
+How  does that look like plotted? 
+
+```{r}
+
+ggplot(ddiff_yr, aes(x= `Entry Year`, y=`average day difference`)) +
+  geom_line(aes(group = 1)) +
+  theme(panel.background = element_blank())
+
+```
+
+Through the plot we can see that the peak in average day difference was back in 2018. In the coming years, the turnover time has dropped sharply, and this coincides with the NYT article's claim that turnovers in recent years have been more expedited, especially during the Biden administration.
+
+## Which countries sent the most number of kids over the years? 
+
+We want to know the top country that sent the most number of kids for each entry_year.
+
+By total, broken down into years since 2015.
+
+```{r}
+cty_year <- df %>% 
+  group_by(entry_year) %>% 
+  summarise(Country = Child.s.Country.of.Origin[which.max(n())],
+            count = max(n())
+            ) %>% 
+  rename("Entry Year" = entry_year)
+
+cty_year
+```
+
+It would seem that Guatemala and Honduras take turns in being the top home countries of unaccompanied migrant children. Most of these countries are from South America, with the exception of India (2020).
+
+##What about the sponsors?
+
+We will now see the plot of sponsor categories across gender.
+
+```{r, echo=TRUE}
+ggplot(df, aes(x= Child.s.Gender, fill= Sponsor.Category)) +
+  geom_bar(position="dodge") + 
+  labs(fill= "Sponsor Category", xlab="Gender") + 
+  scale_fill_fish(discrete = TRUE, option = "Hypsypops_rubicundus") +
+  scale_y_continuous(labels=comma) +
+  labs(x="Gender", y="", title ="Sponsor Categories across Gender") +
+  theme(panel.background = element_blank())
+```
+
+What do we observe? One, we observe that the females are significantly fewer compared to males. 
+
+Secondly, that the distributions of sponsor categories between these two groups is roughly similar for categories 1 and 3. For sponsor category 2, there is a significant spike for males. It will be interesting to explore the driver for this spike. 
+
+We now check the plot for gender distribution across sponsor categories:
+
+```{r, echo=TRUE}
+ggplot(df, aes(fill= Child.s.Gender, x= Sponsor.Category)) +
+  geom_bar(position="dodge") + 
+  labs(xlab= "Sponsor Category", fill="Gender") + 
+  scale_fill_fish(discrete = TRUE, option = "Hypsypops_rubicundus") +
+  scale_y_continuous(labels=comma)+
+  labs(x= "Sponsor Category", y="", title = "Gender distribution across Sponsor Categories")+
+  theme(panel.background = element_blank())
+
+```
+
+This plot is just another way of looking at the plot that preceded it. The starkest observation here is that for Sponsor Category 2, males are significantly higher than their female counterparts, which we've already previously noted. 
+
+Let's check out this cross tabulation of plot 2 and then look at what the plots are telling us.
+
+```{r, echo=TRUE}
+crosstab <- df %>% 
+  group_by(Child.s.Gender) %>% 
+  count(Sponsor.Category) %>% 
+  mutate(pct = n / sum(n) * 100) %>% 
+  rename(Gender = Child.s.Gender) %>% 
+  pivot_wider(names_from = Sponsor.Category, values_from = n)
+
+kable(crosstab,
+      caption = "Sponsor Category counts by Gender",
+      format.args = list(big.mark = ","))
+
+```
+Plot 1 of child's gender plotted against sponsor category tells us that males are more than females, but the proportion of sponsors within these two categories tells us that there are more sponsor 1 categories for Females than there are for males. For males, the bigger proportion goes to category 2 sponsors. Least proportion goes to Sponsor category 3 for both genders.
+
+Plot 2 of child's gender plotted against sponsor category tells us that sponsor category 2 is the sponsor category with the most number of children, followed by sponsor category 1 and then 3. In terms of the proportions of genders within sponsor categories 1 and 2, we can see that males outnumber females, which coincides with our observation in the previous plot. Though trailing by a huge margin, sponsor category 3's males still outnumber females. Our cross tabulation validates this.
+
+## How do sponsor categories change over the years? 
+
+```{r, echo=TRUE}
+ggplot(df, aes(x = as.factor(entry_year), fill = Sponsor.Category)) +
+  geom_bar(position = "dodge") +
+  labs(x= "Entry Year", y="", fill="Sponsor Category") + 
+  scale_y_continuous(labels=comma) +
+  scale_fill_fish(discrete = TRUE, option = "Coryphaena_hippurus") +
+  theme(panel.background = element_blank())
+```
+
+The bar plot shows us that in recent years, the proportion of category 2 sponsors has shot up significantly compared to category 1 sponsors. Sponsor Category 3 remained lower relatively throughout, but in the recent years their numbers also shot up compared to their predecessor years (except for 2023). This ties in with the observation from the 1st plots: there are more category 2 sponsors for males. This likely means that over the years, more and more males are becoming unaccompanied migrant children
+
+##How many unaccompanied migrated children have migrated over the years?
+
+This bar plot shows us the distribution of the number of children that have migrated to the US unaccompanied, only having sponsors to take them in once they land in the US. Speaking of sponsors, we wanna know:
+
+```{r, echo=TRUE}
+ggplot(data, aes(x= as.factor(entry_year))) + 
+  geom_bar(fill = "maroon") +
+  scale_y_continuous(labels=comma) +
+  labs(x="Entry Year", title= "Number of unaccompanied migrant children per entry year", y="") +
+  theme(panel.background = element_blank())
+```
+
+##How do sponsor categories differ across countries of origin? 
+
+First we take the number of countries, and then we store in a variable called country_spon the tibble of sponsor categories across the top 5 home countries of migrant children. 
+
+```{r, echo=TRUE}
+n_distinct(data$Child.s.Country.of.Origin) 
+# 112
+
+#Top 5 countries and how sponsor categories are divided among them
+
+country_spon <- data %>% 
+  group_by(Child.s.Country.of.Origin) %>% 
+  count(Sponsor.Category) %>% 
+  mutate(pct = round(n / sum(n) * 100, 2)) %>% 
+  mutate(total = sum(n)) %>% 
+  arrange(desc(total)) %>% 
+  head(15) %>% 
+  rename(Country = Child.s.Country.of.Origin, "Sponsor Category" = Sponsor.Category, count = n) %>% 
+  as_tibble()
+
+country_spon
+```
+
+We can see through this tibble that for Guatemala at the top spot, 50% are sponsor category 2. For Honduras at the second spot, Sponsor categories 1 and 2 are almost even. For El Salvador at the third spot, 50% are sponsor category 1. For Mexico, almost 60% are sponsor category 1. For Ecuador, almost 60% are sponsor category 1.
+
+The next part is a little obvious, but we're going to make a table of which countries had the most sponsors/most migrant children.
+
+```{r, echo=TRUE}
+
+Total_spon <- data %>%
+  group_by(Child.s.Country.of.Origin) %>%
+  summarise(Total.Sponsors = sum(Sponsor.Category == "1") +  # Adjust category names
+              sum(Sponsor.Category == "2") +
+              sum(Sponsor.Category == "3")) %>% 
+  arrange(desc(Total.Sponsors))
+
+Total_spon
+
+head_total_spon <- head(Total_spon, 5)
+
+head_total_spon
+```
+
+Based on our results, the countries with the most number of sponsors are Guatemala, Honduras, El Salvador, Mexico, and Ecuador. Let's plot that. 
+
+```{r, echo=TRUE}
+ggplot(head_total_spon, aes(x= Child.s.Country.of.Origin, y=Total.Sponsors)) +
+  geom_bar(stat="identity", fill = "skyblue") +
+  labs(x= "Country", title = "Where are the children mostly from?", y = "") +
+  scale_y_continuous(labels=comma) +
+  theme(panel.background = element_blank())
+```
+
+And that's a wrap for our exploratory data analysis! 
+
+Based on the NYT article (https://www.nytimes.com/2023/02/25/us/unaccompanied-migrant-child-workers-exploitation.html)
+
+The picture is bleak: most of the children coming in from South America, in droves. 
+
+A large majority of these unaccompanied migrants are males.
+
+Over the years, more and more children are being sent to the US to work menial jobs and with very little protection.
+
+Meanwhile, sponsors turned from parents to immediate family, as the trend shows. Children were also being detained for long periods of time before being released to sponsors. 
