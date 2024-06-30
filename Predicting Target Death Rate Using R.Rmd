@@ -1,0 +1,314 @@
+---
+title: "Predicting Target Death Rate Using R"
+author: "Mel Ong"
+date: "2024-05-25"
+output:
+  html_document:
+    df_print: paged
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+# Call required libraries
+
+library(ggplot2)
+library(dplyr)
+library(car)
+library(MASS)
+
+```
+
+## Introduction
+
+We have data from <https://www.kaggle.com/datasets/tanisha1604/cancer-data-of-united-states-of-america/data> 
+
+This dataset contains economic data based on demography. Among the columns is a variable called **target death rate**, which is what we will try to predict. 
+
+How do we do that? First. we'll call the required libraries.
+
+```{r}
+# Call required libraries
+
+library(ggplot2)
+library(dplyr)
+library(car)
+library(MASS)
+
+```
+
+After loading the libraries, we then set the working directory and then import the data:
+
+```{r, echo=TRUE}
+
+# Set the working directory and then import the data
+
+setwd("C:/Users/levil/Desktop/Cancer")
+
+data1 <- read.csv("cancer_reg.csv")
+data2 <- read.csv("avg-household-size.csv")
+
+```
+
+Because we have two dataframes that can be joined via the geography column, let's join the two dataframes.
+
+```{r}
+
+# Joining the dataframes
+
+combo <- left_join(data1, data2, by = "geography")
+
+
+```
+
+## Data Cleaning
+
+Now that we have joined the two dataframes, it's time to see if there are any NA values. We want to avoid having NA values because they mess up our results. 
+
+```{r}
+# Check for any NA values in each column (TRUE if NA present)
+
+na_col_numbers <- combo %>% 
+  is.na() %>% 
+  colSums() > 0
+
+which(na_col_numbers) # tells us which column numbers have NA values
+```
+Firstly, let's understand `na_col_numbers`. We're taking `combo` and are putting it as first argument in  `is.na()`, which means we're screening for NA values in `combo`. This will return a `TRUE` or `FALSE`.
+
+Once we do that, we pass on the argument to `colSums() > 0`. What we are essentially doing is counting the `FALSE`. We're saying, if the number of `FALSE` in each column is > 0, then that column is gonna be a part of `na_col_numbers`.  
+
+Columns 17, 21, and 24 are the columns to remove. We're lucky we only have 3 columns that have NA values, because if we had more, it would be such an unsophisticated route to take note of each of the column numbers and then add them to `combo <- combo[, -c(17,21,24)]`. No, we're not gonna do that. Instead, we do this:
+
+```{r}
+combo <- combo[, !na_col_numbers]
+```
+
+In this way, we choose the columns from combo that are NOT (because of the exclamation point) part of `na_col_numbers`. That new dataframe is what we overwrite as `combo`.
+
+Next thing on the agenda is for descriptive stats. 
+
+## Descriptive Stats
+
+We now wanna check the summary to find anything fishy. The summary function gives us the Min, 1st Quartile, Median, Mean, 3rd Quartile, and the Max values of each column. You'll notice some of the other columns have `class: character` listed on them. That just means that the data type is not numeric. It's chr. 
+
+```{r}
+summary(combo)
+```
+
+Moving on, we want to do a little data manipulation by converting the data types of some of the columns we have. We do this by the function `mutate()`:
+
+```{r}
+combo <- combo %>% 
+  mutate(statefips = as.factor(statefips), 
+         countyfips = as.factor(countyfips),
+         avgdeathsperyear = as.numeric(avgdeathsperyear),
+         medincome = as.numeric(medincome),
+         popest2015 = as.numeric(popest2015)
+  )
+```
+
+## Correlation Heatmap
+
+Once that's out of the way, we want to now make a correlation heatmap. Why? Because we wanna see the relationships these variables have with each other, and we wanna know which variables are the most likely to be a part of our predictive model. 
+
+But first, no heatmap is complete without its color palette, so that's what we're gonna be making. This next line of code makes a color palette in blue, white, and red. Blue for strong negative correlation, white for so-so, red for strong positive correlation. In 20 shades. 
+
+```{r}
+col<- colorRampPalette(c("blue", "white", "red"))(20)
+```
+
+Next thing is to exclude the non-numeric data types in our correlation heatmap. Because why would you include a character data type in a correlation heatmap? That just wouldn't make sense. Letters won't vibe well with numbers. 
+
+We first make a value called `numeric_cols` to denote a new dataframe from `combo`. `is.numeric` ensures that this value only includes columns that are numeric. 
+
+Then, we make a new dataframe called combo1 because of course we don't wanna mess with our original dataframe `combo`. 
+
+To make combo1, we are essentially asking for R to get all the rows from `combo`, but that all the columns gotta be `numeric_cols`, which is code for all columns being numeric.
+
+```{r}
+numeric_cols <- sapply(combo, is.numeric)
+combo1 <- combo[, numeric_cols]
+str(combo1)
+```
+Perfect! 
+
+The data types of the columns from `combo1` check out. Now that all columns are numeric, we can then proceed to the correlation heatmap. 
+
+
+```{r}
+combo1cor <- round(cor(combo1, method = "pearson"), 2)
+heatmap(x = combo1cor, col = col, symm = TRUE)
+```
+
+What did we do? We made a value called `combo1cor` and stored in it the Pearson correlation coefficients of each variable with every other variable. 
+
+And then we made the heatmap, where `x` (the object) is `combo1cor`, `col = col` meaning color is set to `col` (our color palette that we just made a while ago), `symm = TRUE` stands for the heatmap being symmetrical. 
+
+Now that we can see the correlations visually, what's the next step? We want to now build our predictive model. 
+
+## Building our Predictive Model
+
+```{r}
+set.seed(123)
+```
+
+What is `set.seed()` for? According to google, it's for reproducibility. So firstly, when we make predictive models, we need a training and a test data set. What we're about to do right now is to partition our `combo` dataset into 2. One will be for training, the other for testing. When we do this, from my understanding, R will try to designate randomly rows within the dataframe for training and then the others for testing. R does this randomly each run of the code. So let's say if you run the code once and then close the program and then run it a second time the next day, R will designate a different set of rows for training and for testing.
+
+This still doesn't explain `set.seed()`. Well, this is where it comes in. The role of `set.seed()` is for reproducibility of results. You can actually put any number in that parenthesis. I just chose 123 because I want to but you can choose 300, 5000, 199, whatever. Think of the numbers as editions. They're ways of designating which rows get to be part of the training set and which rows get to be a part of the test set. So `set.seed(123)` is kind of like saying I want to designate the rows into training and test data set, 123 edition.
+
+```{r}
+# Set the proportion for training data (e.g., 70%)
+train_prop <- 0.7
+
+# Get the number of rows for training data
+train_size <- floor(nrow(combo1) * train_prop)
+
+# Randomly sample indices for training data
+train_index <- sample(1:nrow(combo1), train_size, replace=FALSE)
+
+# Split data into training and test sets
+train_data <- combo1[train_index, ]
+test_data <- combo1[-train_index, ]
+```
+
+Now, we will set a preliminary model. 
+
+```{r}
+modeltry <- lm(target_deathrate ~ . , 
+               data = train_data)
+```
+
+This is not yet the final model. What we're trying to do is we're gonna see if the variables are co-linear. This means that it violates one of the assumptions of Linear models: multicollinearity. 📈 Linearity, 🔵 independence, 📊 homoscedasticity, 🔔 normality, and 🚫 no multicollinearity are the five key assumptions of linear regression.
+
+```{r}
+vif(modeltry) #tell us which ones are related to each other
+```
+
+As we can see from the results, therea are many variables that have a VIF > 5. This is how we interpret VIF values: 
+
+0- best
+1- good
+5- a little bad
+10- big problem
+
+So we'll weed out the bad ones (aka those that have a VIF>5). We're left with:
+
+```{r}
+modelnew <- lm(target_deathrate ~ 
+                 incidencerate +
+                 studypercap +
+                 medianage +
+                 pctnohs18_24 +
+                 pcths18_24 +
+                 pctbachdeg18_24 +
+                 pcths25_over + 
+                 pctunemployed16_over + 
+                 pctwhite + 
+                 pctasian + 
+                 pctotherrace + 
+                 birthrate, 
+               data = train_data)
+
+summary(modelnew)
+```
+
+Summary looks good because a lot of the independent variables are statistically significant. Nevermind the R-squared. Having an R-squared target is not helpful. It's about building a model as efficient as possible, and if you meet the five assumptions, then that's good enough.
+
+Next, we'll take a look at how some of the independent variables are related to the dependent variable. 
+
+What do we observe?
+
+```{r}
+
+ggplot(modelnew, aes(x = pctunemployed16_over, y= target_deathrate)) +
+  geom_point()
+
+```
+
+Firstly, we see a positive association between `pctunemployed16_over` and `target_deathrate`. This variable, according to the summary, is statistically significant.
+
+```{r}
+ggplot(modelnew, aes(x = pcths25_over, y= target_deathrate)) +
+  geom_point()
+```
+
+Second, we see a positive association between `pcths25_over` and `target_deathrate`. This variable, according to the summary, is statistically significant.
+
+```{r}
+ggplot(modelnew, aes(x = log(pctbachdeg18_24), y= target_deathrate)) +
+  geom_point()
+```
+
+Next, we see that there a negative association between the log of `pctbachdeg18_24` and `target_deathrate`. This variable, however, according to the summary, is statistically significant.
+
+```{r}
+ggplot(modelnew, aes(x = pcths18_24, y= target_deathrate)) +
+  geom_point()
+```
+
+Then, we see a positive association between `pcths18_24` and `target_deathrate`. This variable, according to the summary, is statistically significant.
+
+```{r}
+ggplot(modelnew, aes(x = pctnohs18_24, y= target_deathrate)) +
+  geom_point()
+```
+
+Then, we see very little association between `pctnohs18_24` and `target_deathrate`. This variable, according to the summary, is not statistically significant.
+
+```{r}
+ggplot(modelnew, aes(x = log(studypercap), y= target_deathrate)) +
+  geom_point()
+```
+
+Then, we see very little association between the log of `studypercap` and `target_deathrate`. This variable, according to the summary, is not statistically significant.
+
+```{r}
+ggplot(modelnew, aes(x = incidencerate, y= target_deathrate)) +
+  geom_point()
+```
+
+Lastly, we see a strong positive association between `incidencerate` and `target_deathrate`. This variable, according to the summary, is statistically significant. 
+
+## StepAIC
+
+The next thing we're going to do is to take `modelnew` and to plug it in the  `stepAIC()` function to get the optimal combination of variables with the lowest AIC. A low AIC is good.
+
+```{r}
+library(MASS)
+model <- stepAIC(modelnew, direction = c("both", "backward", "forward"))
+```
+
+Based on these results, the optimal combination is:
+
+```{r}
+summary(model)
+```
+
+`model`, with an AIC of 12907.9
+
+Notice how all of the explanatory variables are statistically significant now. The R-squared may be 0.4491, which means that 44.91% of the variability in the dependent variable can be explained by the model, but that is okay. 
+
+## Calibration plot
+
+Now that we have a predictive model, we will now plot its predicted values against our observed values from the test set. 
+
+```{r}
+y_hat <- predict(model, newdata=test_data)
+y_test <- test_data$target_deathrate
+```
+
+We make a y_hat to store the predicted values of our model that was patched onto our test data.
+We also make a variable called y_test to store the observed values of y in. This is more of a stylistic choice I feel, but it helps make the code more readable. 
+
+```{r}
+{plot(y_test ~ y_hat,  # y-axis: actual values, x-axis: predictions
+     pch = 20,  # point character (e.g., circle)
+     col = "maroon",  # point color
+     main = "Actual vs. Predicted Values",  # plot title
+     xlab = "Predicted Values",  # x-axis label
+     ylab = "Actual Values")
+abline(a = 0, b = 1, col = "maroon")}  # red line with y = x
+```
+
+What does this mean? We see that the predicted values and the actual values are clumped together near the line, so this is good.
