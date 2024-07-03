@@ -5,9 +5,7 @@ date: "2024-06-27"
 output: html_document
 ---
 
-This documentation demonstrates how to forecast Philippine inflation rates using ARIMA. ARIMA models are flexible tools in forecasting time series data given that it is straightforward to implement and that it is easy to compare and test its accuracy vis-a-vis alternative models.
-
-In this regard, we shall compare two models: (a) a base model with manually identified ARIMA orders based on the series' autocorrelation function (ACF) and partial autocorrelation function (PACF); and (b) a model determined via `auto.arima`. Note that since this is forecasting, the forecaster is bound to make errors in judgment and the only best thing one can do is to test for accuracy to select the appropriate model to run the forecasts.
+This documentation demonstrates how to forecast web traffic using ARIMA. 
 
 # Loading the time-series data
 
